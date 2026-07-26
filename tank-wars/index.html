@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Tank Wars - Logistics Base Assault (Soviet Edition)</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-wrap">
+    <h1>🍇 TANK WARS <span class="sub">// State Artillery Trial — Destroy the Enemy Logistics Depot</span></h1>
+
+    <div id="hud">
+      <div class="hud-box">
+        <div class="hud-label">Angle</div>
+        <div class="hud-value" id="hud-angle">45°</div>
+      </div>
+      <div class="hud-box">
+        <div class="hud-label">Power</div>
+        <div class="hud-value" id="hud-power">50</div>
+      </div>
+      <div class="hud-box">
+        <div class="hud-label">Shots Left</div>
+        <div class="hud-value" id="hud-ammo">18</div>
+      </div>
+      <div class="hud-box wide">
+        <div class="hud-label">Logistics Base HP</div>
+        <div id="hp-bar-outer"><div id="hp-bar-inner"></div></div>
+      </div>
+    </div>
+
+    <div id="weapon-select"></div>
+
+    <div id="drone-status" class="hidden">
+      <span>PILOTING FPV DRONE — ARROWS/WASD TO STEER</span>
+      <div id="battery-bar-outer"><div id="battery-bar-inner"></div></div>
+    </div>
+
+    <div id="canvas-holder">
+      <canvas id="game" width="1200" height="600"></canvas>
+      <div id="overlay" class="hidden">
+        <div id="overlay-title"></div>
+        <div id="overlay-detail"></div>
+        <button id="play-again">Play Again</button>
+      </div>
+    </div>
+
+    <div id="controls-help">
+      <span>&larr;/&rarr; or A/D: Angle</span>
+      <span>&uarr;/&darr; or W/S: Power</span>
+      <span>SPACE: Fire</span>
+      <span>1-9: Select Shell</span>
+      <button id="fire-btn">FIRE</button>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
