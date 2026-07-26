@@ -46,6 +46,22 @@
  *                           applied to direct hits and near-misses alike (0.95 = 95% reduction)
  * shield.flickerSpeed     - how fast the shield visual pulses/flickers while active (higher = faster)
  *
+ * defenseDrones.enabled       - master on/off switch for the depot's defense drones
+ * defenseDrones.countMin/Max  - how many defense drones scramble each time the player launches
+ *                           their own FPV drone (rolled once per drone launch, to a whole
+ *                           number within this range)
+ * defenseDrones.spawnZoneStart - fraction (0..1) of the terrain width, measured from the left,
+ *                           marking where defense drones are allowed to spawn - they only
+ *                           guard the depot's side of the map
+ * defenseDrones.altitudeMin/Max - how high (px) above the terrain surface at their spawn column
+ *                           a defense drone hovers
+ * defenseDrones.hoverRadius   - how far (px) a defense drone drifts side to side from its spawn
+ *                           point while hovering
+ * defenseDrones.hoverSpeed    - how fast (radians per ms) a defense drone oscillates side to
+ *                           side; higher = faster, twitchier drifting
+ * defenseDrones.hitRadius     - distance (px) at which the player's FPV drone counts as having
+ *                           collided with a defense drone - both explode, base takes no damage
+ *
  * weapons.startingIndex   - index into weapons.list selected when a new game begins
  * weapons.list            - the arsenal, cycled with keys 1..9 or the on-screen picker. Each entry:
  *     id             - internal key, keep unique
@@ -141,6 +157,18 @@ const SETTINGS = {
     activeDurationMax: 1.6,
     damageReduction: 0.95,
     flickerSpeed: 14,
+  },
+
+  defenseDrones: {
+    enabled: true,
+    countMin: 3,
+    countMax: 5,
+    spawnZoneStart: 0.5,
+    altitudeMin: 60,
+    altitudeMax: 220,
+    hoverRadius: 22,
+    hoverSpeed: 0.0018,
+    hitRadius: 14,
   },
 
   buildings: {

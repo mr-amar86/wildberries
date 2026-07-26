@@ -39,6 +39,7 @@ let baseBox;             // {left, right, top, bottom}
 
 let tank, base, wind, ammo, shotsFired, activeProjectiles, trails, volleyPending;
 let damageTexts, particles, keys, gameOver, gameWon, buildings, currentWeaponIndex;
+let defenseDrones;
 
 function newGame() {
   terrainHeights = generateTerrain();
@@ -75,6 +76,7 @@ function newGame() {
   activeProjectiles = [];
   trails = [];
   volleyPending = false;
+  defenseDrones = [];
   damageTexts = [];
   particles = [];
   keys = keys || {};
@@ -215,6 +217,51 @@ function checkBuildingHit(x, y) {
   return null;
 }
 
+// ---- depot defense drones -----------------------------------------------
+// scrambled fresh each time the player launches their own FPV drone, guarding
+// the depot's side of the map until that volley resolves (see updateProjectile).
+function spawnDefenseDrones() {
+  const cfg = SETTINGS.defenseDrones;
+  if (!cfg.enabled) return;
+  const count = Math.round(randRange(cfg.countMin, cfg.countMax));
+  const zoneLo = W * cfg.spawnZoneStart;
+  for (let i = 0; i < count; i++) {
+    const anchorX = randRange(zoneLo, W - 15);
+    const groundY = terrainHeightAt(anchorX);
+    const altitude = randRange(cfg.altitudeMin, cfg.altitudeMax);
+    defenseDrones.push({
+      anchorX,
+      y: clamp(groundY - altitude, 20, groundY - 20),
+      phase: Math.random() * Math.PI * 2,
+      x: anchorX,
+    });
+  }
+}
+
+function updateDefenseDrones(now) {
+  const cfg = SETTINGS.defenseDrones;
+  for (const d of defenseDrones) {
+    d.x = d.anchorX + Math.sin(now * cfg.hoverSpeed + d.phase) * cfg.hoverRadius;
+  }
+}
+
+function checkDefenseDroneHit(x, y) {
+  const r = SETTINGS.defenseDrones.hitRadius;
+  for (const d of defenseDrones) {
+    const dx = x - d.x, dy = y - d.y;
+    if (dx * dx + dy * dy <= r * r) return d;
+  }
+  return null;
+}
+
+// both drones are destroyed on contact; the depot itself takes no damage from an interception
+function resolveDefenseDroneHit(p, d) {
+  defenseDrones.splice(defenseDrones.indexOf(d), 1);
+  const mx = (p.x + d.x) / 2, my = (p.y + d.y) / 2;
+  spawnParticles(mx, my, ["#e8c9c9", "#8a2020", "#3a1414"]);
+  spawnDamageText(mx, my, "INTERCEPTED", "#ff8f6b");
+}
+
 // ---- wind -------------------------------------------------------------------
 function rollWind() {
   wind = randRange(SETTINGS.wind.min, SETTINGS.wind.max);
@@ -295,6 +342,7 @@ function fire() {
   ammo -= weapon.ammoCost;
   shotsFired++;
   volleyPending = true;
+  if (weapon.isDrone) spawnDefenseDrones();
 
   const rad = (tank.angle * Math.PI) / 180;
   const speed = tank.power * (weapon.velocityScale || SETTINGS.tank.powerToVelocityScale);
@@ -446,6 +494,13 @@ function showOverlay(title, detailHtml) {
 // shared collision checks for anything currently in flight (shell, bomblet, or drone).
 // returns true once the projectile is resolved (exploded, or silently left the play area).
 function resolveImpactChecks(p) {
+  if (p.weapon.isDrone) {
+    const hitDrone = checkDefenseDroneHit(p.x, p.y);
+    if (hitDrone) {
+      resolveDefenseDroneHit(p, hitDrone);
+      return true;
+    }
+  }
   if (checkBaseHit(p.x, p.y)) {
     explode(p.x, p.y, true, p);
     return true;
@@ -514,6 +569,7 @@ function updateProjectile() {
   if (volleyPending && activeProjectiles.length === 0) {
     volleyPending = false;
     if (!gameOver && SETTINGS.wind.changeEvery === "shot") rollWind();
+    defenseDrones = [];
     checkGameEnd();
     updateHUD();
   }
@@ -866,6 +922,42 @@ function drawDroneSprite(x, y) {
   ctx.restore();
 }
 
+function drawDefenseDrones() {
+  for (const d of defenseDrones) drawDefenseDroneSprite(d.x, d.y);
+}
+
+function drawDefenseDroneSprite(x, y) {
+  const r = 7;
+  ctx.save();
+  ctx.translate(x, y);
+
+  ctx.strokeStyle = "#6b1f1f";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-r, -r);
+  ctx.lineTo(r, r);
+  ctx.moveTo(-r, r);
+  ctx.lineTo(r, -r);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(230, 140, 140, 0.65)";
+  for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
+    ctx.beginPath();
+    ctx.arc(dx, dy, r * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#3a1414";
+  ctx.fillRect(-r * 0.5, -r * 0.28, r, r * 0.56);
+
+  ctx.fillStyle = "#ff3b3b";
+  ctx.beginPath();
+  ctx.arc(0, 0, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function drawParticles(now) {
   particles = particles.filter((p) => now - p.born < p.life);
   for (const p of particles) {
@@ -951,6 +1043,7 @@ function render(now) {
   drawWindBox(now);
   drawBase();
   drawShield(now);
+  drawDefenseDrones();
   drawTank();
   drawTrail(now);
   drawProjectile();
@@ -967,6 +1060,7 @@ function update() {
     if (keys["arrowup"] || keys["w"]) tank.power = clamp(tank.power + SETTINGS.tank.powerStep, SETTINGS.tank.powerMin, SETTINGS.tank.powerMax);
     if (keys["arrowdown"] || keys["s"]) tank.power = clamp(tank.power - SETTINGS.tank.powerStep, SETTINGS.tank.powerMin, SETTINGS.tank.powerMax);
   }
+  updateDefenseDrones(performance.now());
   updateProjectile();
   updateHUD();
 }

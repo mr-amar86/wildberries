@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Tank Wars - Settings Playground</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="playground.css" />
+</head>
+<body class="pg-body">
+  <div id="pg-layout">
+    <aside id="pg-panel">
+      <h1>⚙ Settings Playground</h1>
+      <div class="pg-sub">Tweak any tunable, then regenerate. Values map 1:1 to <code>settings.js</code>.</div>
+      <div id="pg-status">Default settings</div>
+      <div class="pg-actions">
+        <button id="pg-apply">Apply Settings & Reload</button>
+        <button id="pg-newmap">New Terrain (Same Settings)</button>
+        <button id="pg-reset">Reset to Defaults</button>
+      </div>
+      <div id="pg-sections"></div>
+    </aside>
+
+    <main id="pg-game">
+      <div id="game-wrap">
+        <h1>🍇 TANK WARS <span class="sub">// Playground Mode</span></h1>
+
+        <div id="hud">
+          <div class="hud-box">
+            <div class="hud-label">Angle</div>
+            <div class="hud-value" id="hud-angle">45°</div>
+          </div>
+          <div class="hud-box">
+            <div class="hud-label">Power</div>
+            <div class="hud-value" id="hud-power">50</div>
+          </div>
+          <div class="hud-box">
+            <div class="hud-label">Shots Left</div>
+            <div class="hud-value" id="hud-ammo">18</div>
+          </div>
+          <div class="hud-box wide">
+            <div class="hud-label">Logistics Base HP</div>
+            <div id="hp-bar-outer"><div id="hp-bar-inner"></div></div>
+          </div>
+        </div>
+
+        <div id="weapon-select"></div>
+
+        <div id="drone-status" class="hidden">
+          <span>PILOTING FPV DRONE — ARROWS/WASD TO STEER</span>
+          <div id="battery-bar-outer"><div id="battery-bar-inner"></div></div>
+        </div>
+
+        <div id="canvas-holder">
+          <canvas id="game" width="1200" height="600"></canvas>
+          <div id="overlay" class="hidden">
+            <div id="overlay-title"></div>
+            <div id="overlay-detail"></div>
+            <button id="play-again">Play Again</button>
+          </div>
+        </div>
+
+        <div id="controls-help">
+          <span>&larr;/&rarr; or A/D: Angle</span>
+          <span>&uarr;/&darr; or W/S: Power</span>
+          <span>SPACE: Fire</span>
+          <span>1-9: Select Shell</span>
+          <button id="fire-btn">FIRE</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="settings.js"></script>
+  <script src="playground-utils.js"></script>
+  <script src="game.js"></script>
+  <script src="playground.js"></script>
+</body>
+</html>
