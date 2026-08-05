@@ -6,6 +6,16 @@
  *                           (0 = smooth rolling hills, 1 = jagged/spiky terrain)
  * terrain.minHeight/maxHeight - allowed range (in px, measured as distance from
  *                           canvas bottom) for the generated terrain surface
+ * terrain.viewWidth       - visible viewport width in px (the canvas element's actual
+ *                           pixel width). terrain.width is the full scrollable world -
+ *                           when it's wider than viewWidth, the camera pans to follow
+ *                           the action; see the `camera` section below
+ * terrain.soilSpeckCount - how many tinted texture specks are scattered through the dirt
+ *                           per game, so the ground isn't a flat gradient
+ * camera.followEase       - 0..1, how quickly the camera eases toward its target position
+ *                           each frame (higher = snappier, lower = more of a lazy drift)
+ * camera.idleAnchorFrac   - 0..1, where the tank sits horizontally in the viewport while
+ *                           aiming and no shot is in flight (0 = left edge, 0.5 = centered)
  * tank.startingAmmo      - shots available per game
  * tank.angleMin/angleMax - firing angle range in degrees (0 = flat right, 180 = flat left)
  * tank.powerMin/powerMax - firing power range shown on the HUD
@@ -27,6 +37,10 @@
  * crater.radius           - radius (px) carved out of the terrain heightmap per impact
  * buildings.count         - how many apartment blocks get scattered across the terrain per game
  * buildings.minSize/maxSize - random size range (px) for each block, for visual variety
+ * background.distantBuildingCount - how many far-off skyline silhouettes get scattered
+ *                           across the map per game (pure backdrop, no collision)
+ * background.treeCount    - how many treeline silhouettes get scattered across the map
+ *                           per game (pure backdrop, no collision)
  * buildings.hitBehavior   - what a direct hit on a block does:
  *                           "none"     = pure background scenery, shots fly through untouched
  *                           "cosmetic" = shots still fly through, but a hit collapses that one
@@ -93,11 +107,23 @@
  */
 const SETTINGS = {
   terrain: {
-    width: 1200,
+    width: 2000,
+    viewWidth: 1200,
     height: 600,
     roughness: 0.55,
     minHeight: 120,
     maxHeight: 380,
+    soilSpeckCount: 650,
+  },
+
+  camera: {
+    followEase: 0.08,
+    idleAnchorFrac: 0.25,
+  },
+
+  background: {
+    distantBuildingCount: 25,
+    treeCount: 65,
   },
 
   tank: {
@@ -172,7 +198,7 @@ const SETTINGS = {
   },
 
   buildings: {
-    count: 14,
+    count: 35,
     minSize: 18,
     maxSize: 36,
     hitBehavior: "cosmetic",

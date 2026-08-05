@@ -5,9 +5,10 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const W = SETTINGS.terrain.width;
+const W = SETTINGS.terrain.width;         // full scrollable world width
+const VIEW_W = SETTINGS.terrain.viewWidth; // visible viewport (canvas pixel width)
 const H = SETTINGS.terrain.height;
-canvas.width = W;
+canvas.width = VIEW_W;
 canvas.height = H;
 
 // ---- DOM refs -------------------------------------------------------------
@@ -40,6 +41,15 @@ let baseBox;             // {left, right, top, bottom}
 let tank, base, wind, ammo, shotsFired, activeProjectiles, trails, volleyPending;
 let damageTexts, particles, keys, gameOver, gameWon, buildings, currentWeaponIndex;
 let defenseDrones;
+let background, soilSpecks;
+
+// ---- camera -----------------------------------------------------------------
+// the world can be wider than the viewport; cameraX is the world-x shown at screen-x 0.
+// manualPan is set while the player drags/scrolls the map by hand, which suspends
+// auto-follow until the next shot is fired.
+let cameraX = 0;
+let manualPan = false;
+let isDragging = false, dragStartClientX = 0, dragStartCamera = 0;
 
 function newGame() {
   terrainHeights = generateTerrain();
@@ -61,6 +71,11 @@ function newGame() {
   };
 
   buildings = generateBuildings();
+  background = generateBackground();
+  soilSpecks = generateSoilTexture();
+
+  cameraX = clamp(tankX - VIEW_W * SETTINGS.camera.idleAnchorFrac, 0, W - VIEW_W);
+  manualPan = false;
 
   tank = { angle: 55, power: 55 };
   base = {
@@ -92,7 +107,7 @@ function newGame() {
 
 // ---- terrain generation (midpoint displacement) ----------------------------
 function generateTerrain() {
-  const segs = 128; // power of two working resolution (kept low so hills stay smooth/rolling; fine sub-pixel noise is not useful at 1200px wide)
+  const segs = 256; // power of two working resolution (kept low so hills stay smooth/rolling; fine sub-pixel noise is not useful at 3000px wide)
   const minH = SETTINGS.terrain.minHeight;
   const maxH = SETTINGS.terrain.maxHeight;
   const roughness = clamp(SETTINGS.terrain.roughness, 0, 1);
@@ -150,6 +165,56 @@ function craterAt(cx, cy, radius) {
     const craterY = cy + Math.sqrt(radius * radius - dx * dx);
     if (craterY > terrainHeights[x]) terrainHeights[x] = craterY;
   }
+}
+
+// ---- distant scenery (sky silhouette layers) + soil texture -----------------
+const DISTANT_BUILDING_COLOR = "rgba(47,51,58,0.28)";
+const FOREST_SHADES = ["#2e4a2a", "#355b30", "#284122"];
+const SOIL_SHADES = [
+  "rgba(120,86,52,0.5)",
+  "rgba(40,26,12,0.55)",
+  "rgba(160,120,80,0.35)",
+  "rgba(90,60,35,0.45)",
+];
+
+// rolled once per game so the skyline/soil pattern stay put for the round, same as buildings
+function generateBackground() {
+  const distantBuildings = [];
+  for (let i = 0; i < SETTINGS.background.distantBuildingCount; i++) {
+    distantBuildings.push({
+      x: randRange(0, W),
+      width: randRange(18, 44),
+      height: randRange(H * 0.06, H * 0.2),
+      hasStack: Math.random() < 0.35,
+    });
+  }
+
+  const forest = [];
+  for (let i = 0; i < SETTINGS.background.treeCount; i++) {
+    forest.push({
+      x: randRange(0, W),
+      width: randRange(12, 22),
+      height: randRange(16, 38),
+      shade: FOREST_SHADES[Math.floor(Math.random() * FOREST_SHADES.length)],
+    });
+  }
+
+  return { distantBuildings, forest };
+}
+
+// small tinted specks scattered through the dirt so it isn't a flat gradient; y is
+// recomputed from the live terrain surface each draw, so craters carry the texture with them
+function generateSoilTexture() {
+  const specks = [];
+  for (let i = 0; i < SETTINGS.terrain.soilSpeckCount; i++) {
+    specks.push({
+      x: randRange(0, W),
+      depth: randRange(3, 220),
+      size: randRange(1, 3),
+      shade: SOIL_SHADES[Math.floor(Math.random() * SOIL_SHADES.length)],
+    });
+  }
+  return specks;
 }
 
 // ---- background apartment blocks (panelki) ----------------------------------
@@ -267,6 +332,20 @@ function rollWind() {
   wind = randRange(SETTINGS.wind.min, SETTINGS.wind.max);
 }
 
+// ---- camera -------------------------------------------------------------
+// while manually panned, the camera just sits wherever the player left it; otherwise
+// it eases toward the in-flight projectile, or a fixed anchor point near the tank
+function desiredCameraX() {
+  if (manualPan) return cameraX;
+  const proj = activeProjectiles[0];
+  if (proj) return clamp(proj.x - VIEW_W / 2, 0, W - VIEW_W);
+  return clamp(tankX - VIEW_W * SETTINGS.camera.idleAnchorFrac, 0, W - VIEW_W);
+}
+
+function updateCamera() {
+  cameraX = clamp(lerp(cameraX, desiredCameraX(), SETTINGS.camera.followEase), 0, W - VIEW_W);
+}
+
 // ---- input --------------------------------------------------------------
 const KEY_BLOCK = new Set([
   "arrowleft", "arrowright", "arrowup", "arrowdown", " ", "a", "d", "w", "s",
@@ -285,6 +364,27 @@ window.addEventListener("keyup", (e) => {
 });
 el.fireBtn.addEventListener("click", fire);
 el.playAgain.addEventListener("click", newGame);
+
+// click-drag or scroll the map to look around; both hand control to manualPan
+// until the next shot is fired (see fire())
+canvas.addEventListener("mousedown", (e) => {
+  isDragging = true;
+  dragStartClientX = e.clientX;
+  dragStartCamera = cameraX;
+});
+window.addEventListener("mousemove", (e) => {
+  if (!isDragging) return;
+  manualPan = true;
+  const scale = VIEW_W / canvas.getBoundingClientRect().width;
+  cameraX = clamp(dragStartCamera - (e.clientX - dragStartClientX) * scale, 0, W - VIEW_W);
+});
+window.addEventListener("mouseup", () => { isDragging = false; });
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  manualPan = true;
+  const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  cameraX = clamp(cameraX + delta, 0, W - VIEW_W);
+}, { passive: false });
 
 // ---- weapons --------------------------------------------------------------
 function currentWeapon() {
@@ -342,6 +442,7 @@ function fire() {
   ammo -= weapon.ammoCost;
   shotsFired++;
   volleyPending = true;
+  manualPan = false; // firing hands control of the camera back to auto-follow
   if (weapon.isDrone) spawnDefenseDrones();
 
   const rad = (tank.angle * Math.PI) / 180;
@@ -601,8 +702,57 @@ function updateHUD() {
 }
 
 // ---- rendering ---------------------------------------------------------------
+// screen-space (not affected by camera scroll) - the sky doesn't parallax
+function drawSky() {
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.65);
+  sky.addColorStop(0, "#454f5e");
+  sky.addColorStop(0.55, "#7c8b93");
+  sky.addColorStop(1, "#c8b696");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, VIEW_W, H);
+}
+
+// distant scenery sits on a nominal horizon line, but never above the *actual* local
+// terrain - when the ground dips lower than that horizon (a valley, a cliff), the
+// element's base drops down to meet it instead of floating over the gap
+function drawDistantBuildings() {
+  const horizon = H * 0.58;
+  ctx.fillStyle = DISTANT_BUILDING_COLOR;
+  for (const b of background.distantBuildings) {
+    const groundY = Math.max(horizon, terrainHeightAt(b.x));
+    ctx.fillRect(b.x - b.width / 2, groundY - b.height, b.width, b.height);
+    if (b.hasStack) ctx.fillRect(b.x + b.width * 0.25, groundY - b.height - 14, 3, 14);
+  }
+}
+
+function drawForest() {
+  const horizon = H * 0.6;
+  for (const t of background.forest) {
+    const groundY = Math.max(horizon, terrainHeightAt(t.x));
+    ctx.fillStyle = t.shade;
+    ctx.beginPath();
+    ctx.moveTo(t.x - t.width / 2, groundY);
+    ctx.lineTo(t.x, groundY - t.height);
+    ctx.lineTo(t.x + t.width / 2, groundY);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawSoilTexture() {
+  for (const s of soilSpecks) {
+    const y = terrainHeightAt(s.x) + s.depth;
+    if (y > H) continue;
+    ctx.fillStyle = s.shade;
+    ctx.beginPath();
+    ctx.ellipse(s.x, y, s.size, s.size * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 function drawTerrain() {
   const h = terrainHeights;
+  ctx.save();
   ctx.beginPath();
   ctx.moveTo(0, H);
   ctx.lineTo(0, h[0]);
@@ -610,11 +760,18 @@ function drawTerrain() {
   ctx.lineTo(W - 1, h[W - 1]);
   ctx.lineTo(W, H);
   ctx.closePath();
+  ctx.clip();
+
   const dirtGrad = ctx.createLinearGradient(0, H * 0.4, 0, H);
   dirtGrad.addColorStop(0, "#6b4a2f");
+  dirtGrad.addColorStop(0.4, "#5a3d26");
+  dirtGrad.addColorStop(0.7, "#472f1c");
   dirtGrad.addColorStop(1, "#33220f");
   ctx.fillStyle = dirtGrad;
-  ctx.fill();
+  ctx.fillRect(0, 0, W, H);
+
+  drawSoilTexture();
+  ctx.restore();
 
   const grassH = 10;
   ctx.beginPath();
@@ -716,6 +873,39 @@ function drawStar(cx, cy, r) {
   ctx.fill();
 }
 
+// small berry cluster + leaf, used as the depot's roof emblem in place of a star
+function drawWildberry(cx, cy, r) {
+  const berryR = r * 0.42;
+  const offsets = [
+    { dx: -berryR * 0.9, dy: berryR * 0.5 },
+    { dx: berryR * 0.9, dy: berryR * 0.5 },
+    { dx: 0, dy: -berryR * 0.3 },
+    { dx: 0, dy: berryR * 1.1 },
+  ];
+  ctx.fillStyle = "#5a1a4a";
+  for (const o of offsets) {
+    ctx.beginPath();
+    ctx.arc(cx + o.dx, cy + o.dy, berryR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  for (const o of offsets) {
+    ctx.beginPath();
+    ctx.arc(cx + o.dx - berryR * 0.3, cy + o.dy - berryR * 0.3, berryR * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = "#3c6b35";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - berryR * 0.3);
+  ctx.lineTo(cx, cy - r);
+  ctx.stroke();
+  ctx.fillStyle = "#4c8a3f";
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.35, cy - r * 0.75, r * 0.35, r * 0.16, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawTank() {
   const bw = SETTINGS.tank.width;
   const bh = SETTINGS.tank.height;
@@ -741,10 +931,6 @@ function drawTank() {
   ctx.beginPath();
   ctx.arc(pivotX, pivotY, bh * 0.5, 0, Math.PI * 2);
   ctx.fill();
-
-  // red star insignia on the hull
-  ctx.fillStyle = "#c62828";
-  drawStar(bx + bw * 0.28, by + bh * 0.65, bh * 0.32);
 
   const tip = barrelTip();
   ctx.strokeStyle = "#2f2f2f";
@@ -794,9 +980,8 @@ function drawBase() {
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // red star at the roof apex
-  ctx.fillStyle = "#c62828";
-  drawStar(bx + bw / 2, by - bh * 0.35 - 3, 7);
+  // wildberry emblem at the roof apex
+  drawWildberry(bx + bw / 2, by - bh * 0.35 - 3, 7);
 
   // violet trim stripe
   ctx.fillStyle = "#8b5cf6";
@@ -992,7 +1177,7 @@ function drawDamageTexts(now) {
 // for headwind, with chevron count and drift speed both scaling with wind strength.
 function drawWindBox(now) {
   const boxW = 128, boxH = 32;
-  const bx = W / 2 - boxW / 2, by = 12;
+  const bx = VIEW_W / 2 - boxW / 2, by = 12;
 
   ctx.fillStyle = "#26231d";
   ctx.fillRect(bx, by, boxW, boxH);
@@ -1036,11 +1221,71 @@ function drawWindBox(now) {
   ctx.restore();
 }
 
+// small live overview of the whole world in the top-right corner: terrain silhouette,
+// tank/base markers, in-flight projectiles, and a highlighted box for what the camera
+// currently frames - screen-space, drawn on top of everything else
+function drawMinimap() {
+  const mmW = 220, mmH = 50, padX = 6, padY = 6;
+  const mx = VIEW_W - mmW - 14, my = 14;
+  const innerW = mmW - padX * 2, innerH = mmH - padY * 2;
+  const toMiniX = (worldX) => mx + padX + (worldX / W) * innerW;
+  const groundY = my + padY + innerH;
+  const bandH = innerH * 0.55;
+  const minH = SETTINGS.terrain.minHeight, maxH = SETTINGS.terrain.maxHeight;
+
+  ctx.fillStyle = "rgba(20,18,14,0.85)";
+  ctx.fillRect(mx, my, mmW, mmH);
+  ctx.strokeStyle = "#55503f";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mx, my, mmW, mmH);
+
+  ctx.beginPath();
+  ctx.moveTo(mx + padX, groundY);
+  const samples = 100;
+  for (let i = 0; i <= samples; i++) {
+    const wx = clamp(Math.round((i / samples) * (W - 1)), 0, W - 1);
+    const hillHeight = H - terrainHeights[wx];
+    const frac = clamp((hillHeight - minH) / (maxH - minH), 0, 1);
+    ctx.lineTo(toMiniX(wx), groundY - frac * bandH);
+  }
+  ctx.lineTo(mx + padX + innerW, groundY);
+  ctx.closePath();
+  ctx.fillStyle = "#5a3d26";
+  ctx.fill();
+
+  ctx.fillStyle = base.destroyed ? "#555" : "#b768ff";
+  ctx.beginPath();
+  ctx.arc(toMiniX(baseX), groundY - 4, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#8bc34a";
+  ctx.beginPath();
+  ctx.arc(toMiniX(tankX), groundY - 4, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffcf5c";
+  for (const p of activeProjectiles) {
+    ctx.beginPath();
+    ctx.arc(toMiniX(p.x), groundY - bandH * 0.6, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const viewX0 = toMiniX(cameraX);
+  const viewX1 = toMiniX(cameraX + VIEW_W);
+  ctx.strokeStyle = "#7fe0ff";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(viewX0, my + padY, viewX1 - viewX0, innerH);
+}
+
 function render(now) {
-  ctx.clearRect(0, 0, W, H);
+  ctx.clearRect(0, 0, VIEW_W, H);
+  drawSky();
+  ctx.save();
+  ctx.translate(-cameraX, 0);
+  drawDistantBuildings();
+  drawForest();
   drawTerrain();
   drawBuildings();
-  drawWindBox(now);
   drawBase();
   drawShield(now);
   drawDefenseDrones();
@@ -1049,6 +1294,9 @@ function render(now) {
   drawProjectile();
   drawParticles(now);
   drawDamageTexts(now);
+  ctx.restore();
+  drawWindBox(now);
+  drawMinimap();
 }
 
 // ---- main loop ----------------------------------------------------------
@@ -1062,6 +1310,7 @@ function update() {
   }
   updateDefenseDrones(performance.now());
   updateProjectile();
+  updateCamera();
   updateHUD();
 }
 

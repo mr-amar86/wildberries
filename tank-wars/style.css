@@ -166,6 +166,11 @@ canvas {
   background: #8fa9ac;
   width: 100%;
   height: auto;
+  cursor: grab;
+}
+
+canvas:active {
+  cursor: grabbing;
 }
 
 #overlay {
