@@ -16,6 +16,13 @@
  *                           each frame (higher = snappier, lower = more of a lazy drift)
  * camera.idleAnchorFrac   - 0..1, where the tank sits horizontally in the viewport while
  *                           aiming and no shot is in flight (0 = left edge, 0.5 = centered)
+ * camera.impactHoldMs     - how long (ms) the camera lingers on an impact point after a hit
+ *                           before easing back to the tank, so the player can actually see
+ *                           what just happened instead of snapping away immediately
+ * ui.gameEndDelayMs       - how long (ms) to wait after the game is actually won or lost
+ *                           before the result overlay appears, so the final impact plays
+ *                           out (and the camera has time to hold on it) instead of the
+ *                           screen cutting to the overlay instantly
  * tank.startingAmmo      - shots available per game
  * tank.angleMin/angleMax - firing angle range in degrees (0 = flat right, 180 = flat left)
  * tank.powerMin/powerMax - firing power range shown on the HUD
@@ -89,7 +96,7 @@
  *                      scoped to this weapon. The "standard" entry omits these and simply falls
  *                      back to the top-level damage/crater settings, so tuning "the default shell"
  *                      still only means editing one place.
- *     clusterCount   - cluster weapons only: how many bomblets burst out on primary impact
+ *     clusterCount   - cluster weapons only: how many bomblets burst out on primary detonation
  *     clusterSpreadSpeed - cluster weapons only: max horizontal/vertical scatter speed (px/frame)
  *                      given to each bomblet
  *     bomblet        - cluster weapons only: a nested damage profile (same fields as above) used
@@ -104,6 +111,12 @@
  *         gravity          - constant downward "sink" applied every frame regardless of input,
  *                            so the pilot has to actively hold climb to hold altitude
  *         windMultiplier   - how much harder wind pushes the (light) drone than it pushes a shell
+ *
+ *     clusterCount/isDrone are independent flags and can combine on one weapon (see
+ *     "clusterDrone" below): a piloted drone that, when it detonates, also bursts into
+ *     bomblets - primary damage fields are the drone's own detonation, `bomblet` is each
+ *     bomblet's. Getting intercepted by a defense drone denies the cluster payload entirely
+ *     (interception bypasses detonation, same as any other FPV drone).
  */
 const SETTINGS = {
   terrain: {
@@ -119,6 +132,11 @@ const SETTINGS = {
   camera: {
     followEase: 0.08,
     idleAnchorFrac: 0.25,
+    impactHoldMs: 1200,
+  },
+
+  ui: {
+    gameEndDelayMs: 1800,
   },
 
   background: {
@@ -131,7 +149,7 @@ const SETTINGS = {
     angleMin: 0,
     angleMax: 180,
     powerMin: 0,
-    powerMax: 100,
+    powerMax: 150,
     powerToVelocityScale: 0.17,
     width: 34,
     height: 14,
@@ -143,8 +161,8 @@ const SETTINGS = {
   gravity: 0.16,
 
   wind: {
-    min: -55,
-    max: 55,
+    min: -35,
+    max: 35,
     changeEvery: "shot",
     visualScale: 1.0,
     accelScale: 0.0028,
@@ -179,8 +197,8 @@ const SETTINGS = {
     enabled: true,
     cyclePeriodMin: 7,
     cyclePeriodMax: 12,
-    activeDurationMin: 0.8,
-    activeDurationMax: 1.6,
+    activeDurationMin: 1.2,
+    activeDurationMax: 2.6,
     damageReduction: 0.95,
     flickerSpeed: 14,
   },
@@ -269,6 +287,40 @@ const SETTINGS = {
         nearMissDamageFar: 1,
         falloffExponent: 1,
         craterRadius: 20,
+        drone: {
+          batteryMs: 5000,
+          thrustAccel: 0.35,
+          maxSpeed: 6,
+          gravity: 0.05,
+          windMultiplier: 2.5,
+        },
+      },
+      {
+        id: "clusterDrone",
+        label: "Cluster FPV Drone",
+        ammoCost: 4,
+        color: "#6a1a4a",
+        projectileRadius: 4,
+        isDrone: true,
+        velocityScale: 0.08,
+        directHitMin: 6,
+        directHitMax: 10,
+        splashRadiusMultiplier: 1.0,
+        nearMissDamageClose: 5,
+        nearMissDamageFar: 1,
+        falloffExponent: 1,
+        craterRadius: 12,
+        clusterCount: 5,
+        clusterSpreadSpeed: 3.5,
+        bomblet: {
+          directHitMin: 10,
+          directHitMax: 16,
+          splashRadiusMultiplier: 1.6,
+          nearMissDamageClose: 8,
+          nearMissDamageFar: 1,
+          falloffExponent: 1,
+          craterRadius: 16,
+        },
         drone: {
           batteryMs: 5000,
           thrustAccel: 0.35,

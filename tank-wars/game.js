@@ -42,6 +42,7 @@ let tank, base, wind, ammo, shotsFired, activeProjectiles, trails, volleyPending
 let damageTexts, particles, keys, gameOver, gameWon, buildings, currentWeaponIndex;
 let defenseDrones;
 let background, soilSpecks;
+let pendingOverlay; // {title, detailHtml, revealAt} - queued by checkGameEnd(), shown once the delay elapses
 
 // ---- camera -----------------------------------------------------------------
 // the world can be wider than the viewport; cameraX is the world-x shown at screen-x 0.
@@ -50,6 +51,7 @@ let background, soilSpecks;
 let cameraX = 0;
 let manualPan = false;
 let isDragging = false, dragStartClientX = 0, dragStartCamera = 0;
+let lastImpactX = 0, lastImpactAt = -Infinity;
 
 function newGame() {
   terrainHeights = generateTerrain();
@@ -76,6 +78,7 @@ function newGame() {
 
   cameraX = clamp(tankX - VIEW_W * SETTINGS.camera.idleAnchorFrac, 0, W - VIEW_W);
   manualPan = false;
+  lastImpactAt = -Infinity;
 
   tank = { angle: 55, power: 55 };
   base = {
@@ -97,6 +100,7 @@ function newGame() {
   keys = keys || {};
   gameOver = false;
   gameWon = false;
+  pendingOverlay = null;
   currentWeaponIndex = SETTINGS.weapons.startingIndex;
 
   rollWind();
@@ -325,6 +329,8 @@ function resolveDefenseDroneHit(p, d) {
   const mx = (p.x + d.x) / 2, my = (p.y + d.y) / 2;
   spawnParticles(mx, my, ["#e8c9c9", "#8a2020", "#3a1414"]);
   spawnDamageText(mx, my, "INTERCEPTED", "#ff8f6b");
+  lastImpactX = mx;
+  lastImpactAt = performance.now();
 }
 
 // ---- wind -------------------------------------------------------------------
@@ -333,12 +339,16 @@ function rollWind() {
 }
 
 // ---- camera -------------------------------------------------------------
-// while manually panned, the camera just sits wherever the player left it; otherwise
-// it eases toward the in-flight projectile, or a fixed anchor point near the tank
+// while manually panned, the camera just sits wherever the player left it; otherwise it
+// eases toward the in-flight projectile, then lingers on the last impact point for a beat
+// (so a hit is actually visible) before easing back to a fixed anchor point near the tank
 function desiredCameraX() {
   if (manualPan) return cameraX;
   const proj = activeProjectiles[0];
   if (proj) return clamp(proj.x - VIEW_W / 2, 0, W - VIEW_W);
+  if (performance.now() - lastImpactAt < SETTINGS.camera.impactHoldMs) {
+    return clamp(lastImpactX - VIEW_W / 2, 0, W - VIEW_W);
+  }
   return clamp(tankX - VIEW_W * SETTINGS.camera.idleAnchorFrac, 0, W - VIEW_W);
 }
 
@@ -532,16 +542,21 @@ function addScorchMark() {
 }
 
 function spawnBomblets(x, y, weapon) {
+  // bomblets are always dumb falling munitions, even off a piloted cluster drone -
+  // force isDrone off so they don't get treated as a second pilotable projectile
+  const bombletWeapon = weapon.isDrone ? { ...weapon, isDrone: false } : weapon;
   for (let i = 0; i < weapon.clusterCount; i++) {
     const vx = randRange(-weapon.clusterSpreadSpeed, weapon.clusterSpreadSpeed);
     const vy = randRange(-weapon.clusterSpreadSpeed, -1);
-    spawnProjectile(x, y, vx, vy, weapon, true);
+    spawnProjectile(x, y, vx, vy, bombletWeapon, true);
   }
 }
 
 function explode(ix, iy, hitBase, proj) {
   const profile = proj.isBomblet ? proj.weapon.bomblet : weaponProfile(proj.weapon);
   craterAt(ix, terrainHeightAt(ix), profile.craterRadius);
+  lastImpactX = ix;
+  lastImpactAt = performance.now();
 
   if (!base.destroyed) {
     const { damage, type } = computeDamage(ix, iy, hitBase, profile);
@@ -560,7 +575,7 @@ function explode(ix, iy, hitBase, proj) {
   }
 
   spawnParticles(ix, iy);
-  if (proj.weapon.id === "cluster" && !proj.isBomblet) spawnBomblets(ix, iy, proj.weapon);
+  if (proj.weapon.clusterCount && !proj.isBomblet) spawnBomblets(ix, iy, proj.weapon);
 }
 
 function checkGameEnd() {
@@ -569,7 +584,7 @@ function checkGameEnd() {
     gameWon = true;
     const ammoUsed = SETTINGS.tank.startingAmmo - ammo;
     const efficiency = Math.round((ammo / SETTINGS.tank.startingAmmo) * 100);
-    showOverlay(
+    queueOverlay(
       "Logistics Base Destroyed!",
       `Shots fired: ${shotsFired}<br>Ammo used: ${ammoUsed} / ${SETTINGS.tank.startingAmmo}<br>Efficiency score: ${efficiency}%`
     );
@@ -577,11 +592,25 @@ function checkGameEnd() {
     const minCost = Math.min(...SETTINGS.weapons.list.map((w) => w.ammoCost));
     if (ammo < minCost) {
       gameOver = true;
-      showOverlay(
+      queueOverlay(
         "Out of Ammo — Base Survived",
         `Base HP remaining: ${Math.round(base.hp)} / ${SETTINGS.base.maxHP}`
       );
     }
+  }
+}
+
+// gameOver is already set (so input/firing stop immediately) but the result overlay itself
+// waits SETTINGS.ui.gameEndDelayMs, so the final impact - and the camera's hold on it - gets
+// to play out before the screen cuts away
+function queueOverlay(title, detailHtml) {
+  pendingOverlay = { title, detailHtml, revealAt: performance.now() + SETTINGS.ui.gameEndDelayMs };
+}
+
+function updatePendingOverlay(now) {
+  if (pendingOverlay && now >= pendingOverlay.revealAt) {
+    showOverlay(pendingOverlay.title, pendingOverlay.detailHtml);
+    pendingOverlay = null;
   }
 }
 
@@ -1011,16 +1040,6 @@ function drawBase() {
     ctx.arc(baseX + s.rx * bw, (by + bh / 2) + s.ry * bh, s.r, 0, Math.PI * 2);
     ctx.fill();
   }
-
-  // health bar above base
-  const barW = bw * 1.1, barH = 6;
-  const barX = baseX - barW / 2, barY = by - 16;
-  ctx.fillStyle = "rgba(10,14,23,0.8)";
-  ctx.fillRect(barX, barY, barW, barH);
-  ctx.fillStyle = hpFrac > 0.5 ? "#7fe0ff" : hpFrac > 0.2 ? "#ffcf5c" : "#ff5c5c";
-  ctx.fillRect(barX, barY, barW * hpFrac, barH);
-  ctx.strokeStyle = "#2b3a52";
-  ctx.strokeRect(barX, barY, barW, barH);
 }
 
 // pulsing/flickering energy dome that covers the base while its shield cycle is active
@@ -1311,6 +1330,7 @@ function update() {
   updateDefenseDrones(performance.now());
   updateProjectile();
   updateCamera();
+  updatePendingOverlay(performance.now());
   updateHUD();
 }
 
